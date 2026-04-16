@@ -1,0 +1,6 @@
+1. Brave / Playwright setup
+alias brave-debug='/Applications/Brave\ Browser.app/Contents/MacOS/Brave\ Browser \
+    --remote-debugging-port=9222 \
+    --user-data-dir=$HOME/.brave-debug-profile'
+
+2. 
