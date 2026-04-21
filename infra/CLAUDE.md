@@ -84,6 +84,20 @@ bucket.home:/volume1/plex  /mnt/bucket/plex  nfs  defaults,_netdev,x-systemd.aut
 
 ---
 
+## Networking — Tailscale VPN
+
+Tailscale is running across all primary devices, forming a private mesh VPN in addition to the local `.home` network.
+
+**Enrolled devices:**
+- Mac laptop (primary workstation)
+- Sparta (Ubuntu server)
+- Linux laptop (starboard)
+- Mobile phone
+
+This means services on Sparta (Ollama, Grafana, k3s API, etc.) can be reached via Tailscale IP even when not on the home LAN — useful for remote access without opening ports.
+
+---
+
 ## Kubernetes (k3s)
 
 k3s cluster running on the home network.
