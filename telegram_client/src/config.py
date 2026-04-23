@@ -20,9 +20,7 @@ LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
 SESSION_NAME: str = "tg_session"
 
-ALLOWED_EXTENSIONS = {
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".zip", ".tar", ".gz", ".rar", ".7z",
-    ".txt", ".csv", ".json", ".xml",
-    ".png", ".jpg", ".jpeg", ".gif", ".mp4", ".mp3",
-}
+# Extension filter for downloads. Empty set = allow all.
+# Can be converted to an allowlist (add extensions here) or a blacklist
+# (invert the check in downloader.py) as needed.
+ALLOWED_EXTENSIONS: set[str] = set()

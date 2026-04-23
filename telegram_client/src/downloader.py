@@ -49,8 +49,8 @@ async def download_file(
         filename = f"file_{message.id}"
 
     ext = Path(filename).suffix.lower()
-    if ext and ext not in ALLOWED_EXTENSIONS:
-        logger.info("Skipping unsupported extension %s (message_id=%d)", ext, message.id)
+    if ALLOWED_EXTENSIONS and ext not in ALLOWED_EXTENSIONS:
+        logger.info("Skipping extension %s (not in allowlist, message_id=%d)", ext, message.id)
         return
 
     dest = _safe_filename(filename, download_dir)

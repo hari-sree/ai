@@ -1,6 +1,6 @@
 import logging
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient
 from telethon.tl.types import User
 
 import config
@@ -30,14 +30,20 @@ async def run() -> None:
 
     target = await resolve_target_user(client)
 
-    @client.on(events.NewMessage(from_users=target.id))
-    async def handler(event: events.NewMessage.Event) -> None:
-        message = event.message
-        if message.document:
-            logger.info("New file message detected (message_id=%d)", message.id)
-            await download_file(client, message, config.DOWNLOAD_DIR, state)
-        else:
-            logger.debug("Message has no document, skipping (message_id=%d)", message.id)
+    logger.info("Scanning message history for last file from %s...", config.TARGET_USER)
 
-    logger.info("Listening for messages from %s...", config.TARGET_USER)
-    await client.run_until_disconnected()
+    # Walk through message history (newest first) and find the last file message
+    async for message in client.iter_messages(target, filter=None):
+        if not message.document:
+            continue
+
+        if state.is_downloaded(message.id):
+            logger.info("Last file (message_id=%d) already downloaded, nothing to do.", message.id)
+        else:
+            await download_file(client, message, config.DOWNLOAD_DIR, state)
+
+        break  # Only process the single most recent file message
+    else:
+        logger.info("No file messages found in history with %s.", config.TARGET_USER)
+
+    await client.disconnect()
