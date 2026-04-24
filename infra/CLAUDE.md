@@ -4,9 +4,19 @@ This project is for managing, scripting, and automating Sree's home lab infrastr
 
 ---
 
+## Conventions
+
+### Scripts
+All scripts for this project live in the `scripts/` folder. Whenever a new script needs to be created, always place it there.
+
+### UDM Pro — backup before changes
+Before modifying any file on the UDM Pro via SSH, first SCP a copy of that file to the `udm-backups/` folder in this project. Structure: `udm-backups/<YYYY-MM-DD_HH-MM-SS>/<filename>`. This gives a simple timestamped version history. The `scripts/add-dns-record.py` script does this automatically; replicate the same pattern in any future scripts that touch UDM Pro files.
+
+---
+
 ## Network Overview
 
-- **Router/DNS**: Ubiquiti Dream Machine (UDM) — manages static IPs and `.home` hostnames
+- **Router/DNS**: Ubiquiti Dream Machine Pro (UDM Pro) at `192.168.1.1` — manages static IPs and `.home` hostnames
 - **Primary subnet**: `192.168.1.x`
 - **Smart devices subnet**: `192.168.2.x`
 
@@ -16,9 +26,92 @@ This project is for managing, scripting, and automating Sree's home lab infrastr
 |---|---|---|---|
 | `starboard.home` | carbon | `192.168.1.2` | Linux laptop |
 | `bucket.home` | bucket | `192.168.1.174` | Synology NAS |
-| `sparta.home` | sparta | DHCP (static lease) | Always-on Ubuntu 24.04 server, RTX 5060 Ti 16GB |
+| `sparta.home` | sparta | `192.168.1.3` | Always-on Ubuntu 24.04 server, RTX 5060 Ti 16GB |
 | `rpi.home` | rpi | `192.168.2.11` | Raspberry Pi Model B, smartdevices WiFi |
 | `rome.home` | rome | TBD | Currently offline — planned always-on node |
+
+---
+
+## ⚠️ UDM Pro — Changes Require Explicit Confirmation
+
+SSH access to the UDM Pro is configured (keys set up, `root@192.168.1.1`). However:
+
+> **IMPORTANT: Never make any changes to the UDM Pro via SSH or otherwise without explicitly asking Sree for confirmation first.** This includes dnsmasq config, firewall rules, network settings, or any other system modification. Read-only commands (status checks, reading config files) are fine without asking.
+
+> **IMPORTANT: Always back up affected files to `udm-backups/<timestamp>/` before making any change** (see Conventions above).
+
+---
+
+## UDM Pro — DNS Configuration
+
+DNS on the UDM Pro is served by **dnsmasq**. The configuration is fully managed by `ubios-udapi-server` — never edit the generated files directly.
+
+### Config generation chain
+
+```
+/data/udapi-config/udapi-net-cfg.json   ← source of truth, persists across reboots
+        ↓  read by
+ubios-udapi-server (PID ~2299)
+        ↓  generates
+/run/dnsmasq.dns.conf.d/main.conf       ← auto-generated, DO NOT edit directly (lives in tmpfs)
+        ↓  read by
+dnsmasq
+```
+
+### Key file locations
+
+| Path | Description |
+|---|---|
+| `/data/udapi-config/udapi-net-cfg.json` | Symlink to current versioned config |
+| `/data/udapi-config/udapi-net-cfg-<hash>.json` | Actual versioned config files |
+| `/data/udapi-config/udapi-net-cfg.json.prev` | Symlink to previous version |
+| `/run/dnsmasq.dns.conf.d/main.conf` | Generated dnsmasq config (volatile) |
+| `/run/dnsmasq.dns.conf.d/hosts.d/leases` | Dynamic DHCP lease hostnames (volatile) |
+| `/run/dnsmasq-main.pid` | dnsmasq PID file |
+
+### DNS record format in the JSON
+
+All `.home` hostnames are stored as `hostRecord` objects under `services.dnsForwarder.hostRecords`:
+
+```json
+{
+  "hostName": "sparta.home",
+  "registerNonQualified": false,
+  "address": {
+    "address": "192.168.1.3",
+    "version": "v4"
+  }
+}
+```
+
+### How to add a new DNS record
+
+Use the script — it handles backup, JSON editing, symlink rotation, and dnsmasq reload:
+
+```bash
+./scripts/add-dns-record.py <hostname> <ip>
+# Example:
+./scripts/add-dns-record.py ollama.sparta.home 192.168.1.3
+```
+
+The script:
+1. Backs up the current JSON to `udm-backups/<timestamp>/`
+2. Adds the new `hostRecord` to the JSON
+3. Writes a new versioned JSON file and updates the symlink
+4. Appends `host-record=` to the live `main.conf` for immediate effect
+5. Sends SIGHUP to dnsmasq to reload
+
+> On next UDM Pro reboot, the record comes cleanly from the JSON (no manual step needed).
+
+### Current custom DNS records (sparta subdomains)
+
+All point to `192.168.1.3` (Sparta's LAN IP):
+
+| Hostname | Purpose |
+|---|---|
+| `ollama.sparta.home` | Ollama LLM inference (Caddy → port 11434) |
+| `jupyter.sparta.home` | JupyterLab (Caddy → port 8888) |
+| `claude.sparta.home` | OpenClaw Gateway (Caddy → port 18789) |
 
 ---
 
@@ -26,6 +119,7 @@ This project is for managing, scripting, and automating Sree's home lab infrastr
 
 ### sparta (`sree@sparta.home`)
 - **OS**: Ubuntu 24.04.1 LTS
+- **IP**: `192.168.1.3`
 - **GPU**: NVIDIA RTX 5060 Ti — 16GB VRAM
 - **Role**: Primary AI experimentation node and always-on compute server. Main host for running AI services, LLM inference, and GPU workloads.
 - **Systemd services**:
@@ -137,10 +231,27 @@ ollama run <model>
 
 ---
 
+## Caddy — Reverse Proxy (sparta)
+
+Caddy runs on sparta and exposes internal services via subdomain-based virtual hosts on port 80/443.
+
+Config: `/etc/caddy/Caddyfile`
+
+| Subdomain | Service | Port |
+|---|---|---|
+| `ollama.sparta.home` | Ollama (LLM inference) | 11434 |
+| `jupyter.sparta.home` | JupyterLab | 8888 |
+| `claude.sparta.home` | OpenClaw Gateway | 18789 |
+
+> DNS A records for these subdomains are managed via `scripts/add-dns-record.py` (see UDM Pro — DNS Configuration section).
+
+---
+
 ## SSH Shortcuts
 
 ```shell
 ssh sree@sparta.home
+ssh root@192.168.1.1   # UDM Pro (read-only without confirmation)
 ssh sree@starboard.home
 ssh marcus@bucket.home
 ssh sree@rpi.home
@@ -148,12 +259,12 @@ ssh sree@rpi.home
 
 ---
 
-## Key TODOs (from Notion)
+## Key TODOs
 
-- Add rpi as k3s agent and point kubectl to the right server
 - DNS server: ensure logical hostnames for all containers/services
-- DHCP: control IPs of known services
-- Explore OPNSense firewall
+- **Expose Sparta services to all home nodes (phone, laptop, etc.)**
+  - [x] Subtask 1: Expose services running directly on Sparta (non-Kubernetes) — Caddy subdomains set up for Ollama, JupyterLab, OpenClaw; DNS A records added via script
+  - [ ] Subtask 2: Expose services running inside the k3s cluster — make them reachable from outside the cluster (via Ingress, NodePort, or Tailscale)
 
 ---
 
