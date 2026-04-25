@@ -109,9 +109,10 @@ All point to `192.168.1.3` (Sparta's LAN IP):
 
 | Hostname | Purpose |
 |---|---|
-| `ollama.sparta.home` | Ollama LLM inference (Caddy → port 11434) |
-| `jupyter.sparta.home` | JupyterLab (Caddy → port 8888) |
-| `claude.sparta.home` | OpenClaw Gateway (Caddy → port 18789) |
+| `ollama.sparta.home` | Ollama LLM inference → Traefik → host port 11434 |
+| `jupyter.sparta.home` | JupyterLab → Traefik → host port 8888 |
+| `claude.sparta.home` | OpenClaw Gateway → Traefik → host port 18789 (502 — bound to localhost, pending fix) |
+| `openwebui.sparta.home` | Open WebUI → Traefik → k8s pod port 8080 |
 
 ---
 
@@ -233,17 +234,35 @@ ollama run <model>
 
 ## Caddy — Reverse Proxy (sparta)
 
-Caddy runs on sparta and exposes internal services via subdomain-based virtual hosts on port 80/443.
+Caddy runs on sparta but is **not used for subdomain routing** (Traefik owns port 80 via k3s).
+Caddy currently only serves the `sparta.home` health check.
 
 Config: `/etc/caddy/Caddyfile`
 
-| Subdomain | Service | Port |
-|---|---|---|
-| `ollama.sparta.home` | Ollama (LLM inference) | 11434 |
-| `jupyter.sparta.home` | JupyterLab | 8888 |
-| `claude.sparta.home` | OpenClaw Gateway | 18789 |
+---
 
-> DNS A records for these subdomains are managed via `scripts/add-dns-record.py` (see UDM Pro — DNS Configuration section).
+## Services — Home Network Access
+
+All services are exposed via **Traefik** (k3s ingress, port 80) and DNS records on the UDM Pro.
+Use `scripts/add-dns-record.py` to add new subdomains.
+
+### Host services (non-k8s) — k8s/host-services.yaml
+Exposed via Service + manual Endpoints pointing to `192.168.1.3`:
+
+| URL | Host port | Notes |
+|---|---|---|
+| `http://ollama.sparta.home` | 11434 | Ollama LLM inference ✅ |
+| `http://jupyter.sparta.home` | 8888 | JupyterLab ✅ |
+| `http://claude.sparta.home` | 18789 | OpenClaw Gateway ❌ bound to 127.0.0.1 only |
+
+### k8s services — k8s/open-webui.yaml
+Running as pods inside the cluster, exposed via standard Service + Ingress:
+
+| URL | Image | Notes |
+|---|---|---|
+| `http://openwebui.sparta.home` | `ghcr.io/open-webui/open-webui:main` | Connects to Ollama via `ollama-host` Service ✅ |
+
+> PVC `open-webui-data` (5Gi, local-path) stores chat history and settings.
 
 ---
 
