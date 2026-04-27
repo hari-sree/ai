@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>home.sree.nas-mount</string>
+
+    <!-- Wait 10s after login to ensure network is up before mounting -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>sleep 10 &amp;&amp; /Users/sree/codes/ai/infra/scripts/mount-nas.sh</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Logs go to /tmp/nas-mount.log for debugging -->
+    <key>StandardOutPath</key>
+    <string>/tmp/nas-mount.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/nas-mount.log</string>
+</dict>
+</plist>

@@ -9,6 +9,9 @@ This project is for managing, scripting, and automating Sree's home lab infrastr
 ### Scripts
 All scripts for this project live in the `scripts/` folder. Whenever a new script needs to be created, always place it there.
 
+### macOS LaunchAgents / plists
+macOS LaunchAgent plist files live in `plists/`. These are the source of truth — the installed copies in `~/Library/LaunchAgents/` are derived from here. When setting up a new Mac, copy from `plists/` rather than recreating from scratch.
+
 ### UDM Pro — backup before changes
 Before modifying any file on the UDM Pro via SSH, first SCP a copy of that file to the `udm-backups/` folder in this project. Structure: `udm-backups/<YYYY-MM-DD_HH-MM-SS>/<filename>`. This gives a simple timestamped version history. The `scripts/add-dns-record.py` script does this automatically; replicate the same pattern in any future scripts that touch UDM Pro files.
 
@@ -27,6 +30,7 @@ Before modifying any file on the UDM Pro via SSH, first SCP a copy of that file 
 | `starboard.home` | carbon | `192.168.1.2` | Linux laptop |
 | `bucket.home` | bucket | `192.168.1.174` | Synology NAS |
 | `sparta.home` | sparta | `192.168.1.3` | Always-on Ubuntu 24.04 server, RTX 5060 Ti 16GB |
+| `dock.home` | dock | `192.168.1.4` | Thunderbolt 3 dock's Ethernet NIC — static IP on UDM Pro. Whichever laptop (Mac or starboard) is physically docked appears on LAN as `dock.home`. In the NFS allowlist on bucket so the docked laptop can access NAS shares regardless of which machine is docked. |
 | `rpi.home` | rpi | `192.168.2.11` | Raspberry Pi Model B, smartdevices WiFi |
 | `rome.home` | rome | TBD | Currently offline — planned always-on node |
 
@@ -136,8 +140,14 @@ All point to `192.168.1.3` (Sparta's LAN IP):
 
 ### bucket (`marcus@bucket.home`)
 - **Role**: Synology NAS
-- **SSH**: `ssh marcus@bucket.home`
-- **NFS exports**: `/volume1/plex` (and others)
+- **Model**: Synology DS423+
+- **Kernel**: Linux 4.4 (Synology geminilake)
+- **SSH**: `ssh marcus@bucket.home` (key auth configured from Mac)
+- **NFS exports** (Linux machines only — Mac is not in the allowlist):
+  - `/volume1/pbin` → sparta.home, starboard.home, dock.home
+  - `/volume1/plex` → starboard.home, dock.home
+- **SMB shares**: home, homes, pbin, plex, PlexMediaServer
+- **Mac access**: see [NAS — Mac Access](#nas--mac-access) below
 
 ### rome (`sree@rome.home`)
 - **Status**: Currently offline — being set up, will be always-on going forward
@@ -154,7 +164,7 @@ All point to `192.168.1.3` (Sparta's LAN IP):
 
 ## NFS / Storage
 
-NAS (bucket.home) serves NFS shares. Clients (sparta etc.) mount via fstab for automount.
+NAS (bucket.home) serves NFS shares to Linux machines. Clients (sparta etc.) mount via fstab for automount.
 
 ```shell
 # Check NFS exports on NAS
@@ -176,6 +186,73 @@ bucket.home:/volume1/plex  /mnt/bucket/plex  nfs  defaults,_netdev,x-systemd.aut
 ```
 
 > Note: Map all NFS users to admin with `sys` security — NFS otherwise matches by Linux UID.
+
+---
+
+## NAS — Mac Access
+
+All three NAS shares are mounted on the Mac via **SMB** (AFP was deprecated by Apple and has been fully replaced).
+
+### SMB shares — current mount state
+
+| Share | Mount point | NAS path | Contents |
+|---|---|---|---|
+| `home` | `/Volumes/home` | `/volume1/home` | `bin`, `courses`, `Photos`, `Videos` |
+| `plex` | `/Volumes/plex` | `/volume1/plex` | Plex media library |
+| `pbin` | `/Volumes/pbin` | `/volume1/pbin` | Personal binaries, scripts, pastes |
+| `homes` | — | — | Synology shared homes (not used from Mac) |
+| `PlexMediaServer` | — | — | Plex server data (not used from Mac) |
+
+All mounts use `marcus@bucket.home` credentials stored in the macOS Keychain.
+
+### Auto-mount on login — LaunchAgent
+
+A LaunchAgent runs `mount-nas.sh` automatically 10 seconds after login (delay ensures network is up).
+
+- **Repo copy**: `plists/home.sree.nas-mount.plist` (source of truth — keep this in git)
+- **Installed at**: `~/Library/LaunchAgents/home.sree.nas-mount.plist`
+- **Logs**: `/tmp/nas-mount.log`
+
+To install on a new Mac:
+```bash
+cp plists/home.sree.nas-mount.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/home.sree.nas-mount.plist
+```
+
+### Mount script
+
+```bash
+./scripts/mount-nas.sh          # mount home, plex, pbin
+./scripts/mount-nas.sh unmount  # unmount all
+```
+
+### New Mac setup — one-time steps
+
+1. Connect via Finder (`⌘K` → `smb://bucket.home`) and log in as `marcus` — stores credentials in Keychain
+2. Pre-create mount points with correct ownership:
+   ```bash
+   sudo mkdir -p /Volumes/home /Volumes/plex /Volumes/pbin
+   sudo chown sree /Volumes/home /Volumes/plex /Volumes/pbin
+   ```
+   > Mount points must be owned by `sree` (not root) or `mount_smbfs` will fail with "Operation not permitted"
+3. Install the LaunchAgent (see above)
+4. Run `./scripts/mount-nas.sh` to mount immediately without waiting for next login
+
+### pbin — SSH/rsync alternative
+
+If SMB mount isn't available, `pbin` is always accessible via SSH:
+```bash
+rsync -avz marcus@bucket.home:/volume1/pbin/ ~/local-pbin/   # pull
+rsync -avz ~/somefile marcus@bucket.home:/volume1/pbin/       # push
+```
+
+### Synology Drive app
+The Synology app makes `bucket` appear in Finder's sidebar as a network server browser. Shares listed there are **not OS-level mounts** — they're browseable but not at `/Volumes/*` unless mounted via the script.
+
+### NFS (Linux machines only)
+The Mac is NOT in the NFS allowlist. NFS exports from bucket are only for Sparta/starboard/dock:
+- `/volume1/pbin` → sparta.home, starboard.home, dock.home
+- `/volume1/plex` → starboard.home, dock.home
 
 ---
 
